@@ -1,415 +1,239 @@
 # EGFR Computational Drug Discovery Pipeline
 
+An end-to-end computational workflow for identifying and prioritising potential Epidermal Growth Factor Receptor (EGFR) inhibitors, combining bioactivity data curation, cheminformatics, machine learning, virtual screening, molecular docking, protein–ligand interaction analysis and in-silico ADMET prediction.
+
+---
+
 ## Overview
 
-This project presents an end-to-end computational drug discovery workflow focused on the Epidermal Growth Factor Receptor (EGFR).
+EGFR is a receptor tyrosine kinase and an established target in cancer therapy (e.g., erlotinib in non-small-cell lung cancer). This project builds a reproducible pipeline that moves from raw public bioactivity data to a short list of computationally prioritised candidate compounds.
 
-The project combines bioactivity data curation, cheminformatics, machine learning, virtual screening, molecular docking, protein-ligand interaction analysis, and in-silico ADMET prediction.
+A key focus was not only building predictive models, but also **testing how well they generalise** and being transparent about the limits of computational predictions.
 
-The main objective was to develop a reproducible workflow for identifying and prioritizing potentially EGFR-active compounds while also evaluating model generalization and the limitations of computational predictions.
+---
 
 ## Target Information
 
-- Target: Epidermal Growth Factor Receptor (EGFR)
-- ChEMBL ID: CHEMBL203
-- UniProt ID: P00533
-- Docking structure: PDB 1M17
-- Reference ligand: Erlotinib
+| Item | Value |
+|---|---|
+| Target | Epidermal Growth Factor Receptor (EGFR) |
+| ChEMBL ID | CHEMBL203 |
+| UniProt ID | P00533 |
+| Docking structure | PDB 1M17 |
+| Reference ligand | Erlotinib |
 
-## Project Workflow
+---
 
-ChEMBL EGFR bioactivity retrieval  
-→ Data cleaning and curation  
-→ IC50 to pIC50 transformation  
-→ Activity classification  
-→ Molecular descriptor calculation  
-→ Morgan fingerprint generation  
-→ Machine-learning model development  
-→ Random train/test evaluation  
-→ Scaffold-based validation  
-→ PubChem external compound screening  
-→ Training-set overlap removal  
-→ ML-based candidate ranking  
-→ Tanimoto similarity analysis  
-→ Molecular docking against EGFR  
-→ Protein-ligand interaction analysis  
-→ ADMET prediction  
-→ Final computational candidate prioritization  
+## Workflow
 
-## Bioactivity Data Collection
+```
+ChEMBL EGFR bioactivity retrieval
+  → Data cleaning and curation
+  → IC50 to pIC50 transformation
+  → Activity classification
+  → Molecular descriptors and Morgan fingerprints (RDKit)
+  → Machine-learning model development
+  → Random train/test evaluation
+  → Scaffold-based validation
+  → PubChem external compound screening
+  → Training-set overlap removal
+  → ML-based candidate ranking
+  → Tanimoto similarity analysis
+  → Molecular docking (DockThor)
+  → Protein–ligand interaction analysis (UCSF ChimeraX)
+  → ADMET prediction (ADMETlab)
+  → Final multi-parameter candidate prioritisation
+```
 
-EGFR bioactivity data were collected from the ChEMBL database using the ChEMBL Webresource Client.
+---
 
-The analysis focused on:
+## 1. Data Collection and Curation
 
-- IC50 measurements
-- exact activity relationships
-- values reported in nM
-- EGFR-associated compounds
+EGFR bioactivity data were retrieved from ChEMBL using the ChEMBL Webresource Client, keeping exact IC50 measurements reported in nM.
 
-The dataset was then cleaned to remove missing or invalid records.
+Curation steps:
 
-## Data Cleaning and Curation
+- Removal of missing SMILES and missing/invalid IC50 values
+- Canonicalisation of SMILES with RDKit
+- Grouping of identical structures, with duplicate IC50 values summarised by the median
+- Conversion to pIC50: **pIC50 = 9 − log10(IC50 in nM)**
 
-The preprocessing workflow included:
+| Stage | Count |
+|---|---|
+| Raw ChEMBL records | 520 |
+| Unique compounds | 387 |
+| Compounds used for classification | 308 (215 active, 93 inactive) |
 
-- removal of missing SMILES
-- removal of missing or invalid IC50 values
-- retention of positive IC50 measurements
-- canonicalization of molecular SMILES using RDKit
-- grouping of identical molecular structures
-- duplicate IC50 measurements summarized using the median value
+### Activity classification (project-defined thresholds)
 
-## pIC50 Transformation
+- **Active:** pIC50 ≥ 6
+- **Inactive:** pIC50 ≤ 5
+- Intermediate compounds (5 < pIC50 < 6) were excluded to create clearer class separation
 
-IC50 values reported in nM were transformed into pIC50 values using:
+These thresholds were chosen for this project and are not universal pharmacological cut-offs.
 
-pIC50 = 9 - log10(IC50 in nM)
+---
 
-## Activity Classification
+## 2. Molecular Representation
 
-Project-defined thresholds were used to create a binary classification task:
+- **Morgan fingerprints** (radius 2, 2,048 bits) – main representation for ML models
+- **Physicochemical descriptors** – molecular weight, LogP, HBD, HBA, TPSA and rotatable bonds, used in a separate descriptor-based model
 
-- Active: pIC50 >= 6
-- Inactive: pIC50 <= 5
-- Intermediate compounds with 5 < pIC50 < 6 were excluded
+---
 
-These thresholds were used for this project and should not be interpreted as universal pharmacological cut-offs.
+## 3. Machine-Learning Models
 
-## Molecular Descriptors
+Three supervised classifiers were trained on Morgan fingerprints: **Logistic Regression, Random Forest and XGBoost** (with class weighting for imbalance). Models were evaluated using accuracy, precision, recall, F1-score, ROC-AUC, PR-AUC, confusion matrices, ROC curves and precision–recall curves.
 
-Physicochemical descriptors were calculated using RDKit.
+### Random stratified split
 
-The descriptors included:
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---|---|---|---|---|---|
+| Logistic Regression | 0.935 | 0.976 | 0.930 | 0.952 | 0.994 | 0.997 |
+| Random Forest | 0.935 | 1.000 | 0.907 | 0.951 | 0.994 | 0.997 |
+| **XGBoost** | **0.952** | **1.000** | **0.930** | **0.964** | **0.996** | **0.998** |
 
-- Molecular Weight
-- LogP
-- Hydrogen Bond Donors
-- Hydrogen Bond Acceptors
-- Topological Polar Surface Area
-- Rotatable Bonds
+A descriptor-only Logistic Regression model reached ROC-AUC 0.927, showing that fingerprints captured substantially more activity-relevant information than simple physicochemical properties.
 
-A descriptor-based Logistic Regression model was also used to explore associations between physicochemical properties and EGFR activity.
+### Scaffold-based validation
 
-## Molecular Fingerprints
+Random splits can place structurally similar compounds in both training and test sets, which may inflate performance. A **Bemis–Murcko scaffold split** was therefore used to test generalisation to new chemical series.
 
-Morgan fingerprints were generated using RDKit with:
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---|---|---|---|---|---|
+| XGBoost (scaffold split) | 0.951 | 1.000 | 0.750 | 0.857 | 0.849 | 0.820 |
 
-- Radius: 2
-- Fingerprint size: 2048 bits
+ROC-AUC dropped from **0.996 (random split) to 0.849 (scaffold split)**. This confirms that predicting activity for structurally novel compounds is considerably harder, and that random-split results alone would overestimate real-world performance.
 
-These fingerprints were used as the main molecular representation for the machine-learning models.
+---
 
-## Machine Learning Models
+## 4. External Virtual Screening
 
-Three supervised classification algorithms were evaluated:
+An external library was obtained from PubChem using a structure-similarity search around erlotinib (4,317 compounds). Before prediction, SMILES were validated and canonicalised, duplicates were removed, and compounds overlapping with the training set were excluded, leaving **4,312 compounds**.
 
-- Logistic Regression
-- Random Forest
-- XGBoost
+These were converted to Morgan fingerprints and ranked using the XGBoost model's active-class score. The score was used as a **prioritisation metric**, not as an experimentally measured probability of inhibition.
 
-The models were evaluated using:
+**Tanimoto similarity** to the training set was calculated for each candidate to judge whether top-ranked compounds were close analogues of known actives or more structurally distinct.
 
-- Accuracy
-- Precision
-- Recall
-- F1-score
-- ROC-AUC
-- PR-AUC
-- Confusion Matrix
-- ROC Curve
-- Precision-Recall Curve
-
-## Random Train/Test Evaluation
-
-The curated dataset was divided into training and test sets using stratified random splitting.
-
-The models achieved high predictive performance on the random test set.
-
-However, random splitting can place structurally similar compounds in both the training and test sets, potentially leading to optimistic performance estimates.
-
-## Scaffold-Based Validation
-
-A scaffold-based split was also performed to provide a more challenging evaluation of model generalization.
-
-Performance was lower than with the random split, showing that prediction of structurally different compounds is more difficult than prediction of compounds similar to the training data.
-
-This step was included to assess the ability of the model to generalize to new chemical scaffolds.
-
-## External Compound Screening
-
-An external compound library was obtained from PubChem using an erlotinib similarity search.
-
-Before prediction:
-
-- molecular SMILES were validated
-- molecules were canonicalized
-- duplicate structures were removed
-- exact overlaps with the training dataset were identified
-- training-set overlaps were removed
-
-The remaining compounds were converted into Morgan fingerprints and screened using the trained XGBoost model.
-
-## Candidate Ranking
-
-External compounds were ranked using the XGBoost model-estimated active-class score.
-
-The model score was used as a prioritization metric and should not be interpreted as an experimentally measured probability of EGFR inhibition.
-
-## Tanimoto Similarity Analysis
-
-Tanimoto similarity was calculated between external candidates and compounds in the training dataset.
-
-For each candidate, the maximum similarity to the training set was calculated.
-
-This was used to assess whether highly ranked compounds were close analogues of existing training compounds or represented somewhat different molecular structures.
-
-## Selected Candidates
-
-Four high-priority compounds were selected for further structural analysis:
+The top 10 candidates were shortlisted, and four were selected for structural analysis:
 
 - CID 142677260
 - CID 20747416
 - CID 20747417
 - CID 122232433
 
-Candidate selection considered machine-learning score, structural similarity, and suitability for downstream docking analysis.
+Selection considered ML score, structural similarity and suitability for docking.
 
-## Molecular Docking
+---
 
-Molecular docking was performed using DockThor.
+## 5. Molecular Docking
 
-### Receptor
+Docking was performed with **DockThor** against EGFR (PDB 1M17), using erlotinib as the reference ligand and the same protocol for all compounds.
 
-- EGFR
-- PDB ID: 1M17
+| Parameter | Value |
+|---|---|
+| Grid centre | X = 22.01, Y = 0.25, Z = 52.79 |
+| Grid size | 20 × 20 × 20 Å |
+| Evaluations | 1,000,000 |
+| Population size | 750 |
+| Runs | 24 |
+| Soft docking | Enabled |
 
-### Reference Ligand
+Erlotinib produced a DockThor score of approximately **−9.92**, and the selected candidates scored within a similar range. Docking scores were compared only within this protocol and are not experimental binding affinities.
 
-- Erlotinib
+---
 
-### Binding Site
+## 6. Protein–Ligand Interaction Analysis
 
-Approximate docking center:
+Docked complexes of erlotinib and selected candidates were examined in **UCSF ChimeraX** for hydrogen bonds, protein–ligand contacts, binding-site residues and ligand positioning in the EGFR binding pocket.
 
-- X = 22.01
-- Y = 0.25
-- Z = 52.79
+---
 
-Grid size:
+## 7. ADMET Prediction
 
-- 20 × 20 × 20 Å
+In-silico ADMET properties were predicted with **ADMETlab**:
 
-### Docking Parameters
+- **Physicochemical:** molecular weight, LogP, TPSA, HBD, HBA, rotatable bonds
+- **Absorption and distribution:** human intestinal absorption, blood–brain barrier, P-glycoprotein inhibition and substrate status
+- **Metabolism:** predicted inhibition of CYP1A2, CYP2C19, CYP2C9, CYP2D6 and CYP3A4
+- **Drug-likeness and toxicity:** Ames mutagenicity, QED, Lipinski properties, synthetic accessibility
 
-- Evaluations: 1,000,000
-- Population size: 750
-- Runs: 24
-- Soft docking: enabled
+---
 
-The same docking protocol was applied to the selected candidates and the erlotinib reference.
+## 8. Final Candidate Prioritisation
 
-## Docking Results
+Candidates were compared using multiple lines of computational evidence rather than any single metric:
 
-Erlotinib reference docking produced a DockThor score of approximately:
+- ML active-class score
+- Maximum Tanimoto similarity to training compounds
+- DockThor docking score and interaction energy
+- Physicochemical and predicted ADMET properties
+- Drug-likeness indicators
 
--9.922
+The combined results are saved in `EGFR_Final_Candidate_Comparison.csv`.
 
-The selected candidates produced docking scores within a similar computational range.
-
-Docking scores were interpreted comparatively within the same protocol and should not be treated as experimental binding affinities.
-
-## Protein-Ligand Interaction Analysis
-
-Selected docked complexes were analyzed using UCSF ChimeraX.
-
-The analysis focused on:
-
-- hydrogen bonds
-- protein-ligand contacts
-- binding-site residues
-- ligand positioning within the EGFR binding pocket
-
-Interaction analysis was performed for erlotinib and selected prioritized candidates.
-
-## ADMET Prediction
-
-In-silico ADMET prediction was carried out using ADMETlab.
-
-Properties evaluated included:
-
-### Physicochemical Properties
-
-- Molecular Weight
-- LogP
-- TPSA
-- Hydrogen Bond Donors
-- Hydrogen Bond Acceptors
-- Rotatable Bonds
-
-### Absorption and Distribution
-
-- Human intestinal absorption
-- Blood-brain barrier prediction
-- P-glycoprotein inhibition
-- P-glycoprotein substrate prediction
-
-### Metabolism
-
-Predicted inhibition of:
-
-- CYP1A2
-- CYP2C19
-- CYP2C9
-- CYP2D6
-- CYP3A4
-
-### Drug-Likeness and Toxicity
-
-- Ames mutagenicity prediction
-- QED
-- Lipinski properties
-- Synthetic accessibility
-
-These values are computational predictions and require experimental confirmation.
-
-## Final Candidate Comparison
-
-The final candidate comparison integrated multiple computational evidence sources:
-
-- machine-learning active-class score
-- maximum Tanimoto similarity to training compounds
-- DockThor docking score
-- interaction energy
-- physicochemical properties
-- predicted ADMET properties
-- drug-likeness indicators
-
-Final outputs included:
-
-- EGFR_Final_Candidate_Comparison.csv
-- EGFR_Final_Summary.csv
-
-## Skills Demonstrated
-
-### Machine Learning
-
-- supervised binary classification
-- Logistic Regression
-- Random Forest
-- XGBoost
-- model evaluation
-- ROC-AUC analysis
-- PR-AUC analysis
-- confusion matrix analysis
-- random validation
-- scaffold-based validation
-
-### Cheminformatics
-
-- SMILES processing
-- molecular canonicalization
-- molecular descriptors
-- Morgan fingerprints
-- Tanimoto similarity
-- molecular structure comparison
-
-### Computational Drug Discovery
-
-- bioactivity data curation
-- virtual screening
-- candidate prioritization
-- molecular docking
-- protein-ligand interaction analysis
-- ADMET prediction
-- multi-parameter candidate assessment
-
-### Data Science
-
-- data cleaning
-- feature engineering
-- exploratory analysis
-- model comparison
-- data visualization
-- integration of outputs from multiple computational tools
+---
 
 ## Tools and Technologies
 
-### Programming and Data Analysis
+| Category | Tools |
+|---|---|
+| Programming and data analysis | Python, pandas, NumPy, Matplotlib |
+| Machine learning | scikit-learn, XGBoost |
+| Cheminformatics | RDKit |
+| Databases | ChEMBL, PubChem, UniProt, Protein Data Bank |
+| Molecular docking | DockThor |
+| Molecular visualisation | UCSF ChimeraX |
+| ADMET prediction | ADMETlab |
+| Environment | Google Colab, Jupyter Notebook, GitHub |
 
-- Python
-- pandas
-- NumPy
-- matplotlib
+---
 
-### Machine Learning
+## Files in This Repository
 
-- scikit-learn
-- XGBoost
+| File | Description |
+|---|---|
+| `EGFR_Bioactivity.ipynb` | Main notebook: data curation, ML models, validation and screening |
+| `EGFR_external_predictions.csv` | Model predictions for external PubChem compounds |
+| `EGFR_ranked_external_candidates.csv` | External compounds ranked by ML score |
+| `EGFR_top10_candidates_for_docking.csv` | Shortlisted candidates for docking |
+| `EGFR_Final_Candidate_Comparison.csv` | Final multi-parameter comparison |
+| `Candidate 1.csv` – `Candidate 4.csv` | Per-candidate results |
+| `Candidate_*` / `candidate *` (.zip) | Docking outputs for each candidate |
+| `EGFR_Erlotinib_Redocking_.zip` | Erlotinib reference docking outputs |
+| `1M17.pdb`, `1M17_cleaned.pdb`, `protein_prep.pdb` | EGFR structure files used for docking |
+| `Erlotinib_EGFR_interactions.png` | Erlotinib–EGFR interaction visualisation |
 
-### Cheminformatics
-
-- RDKit
-
-### Databases
-
-- ChEMBL
-- PubChem
-- UniProt
-- Protein Data Bank
-
-### Molecular Docking
-
-- DockThor
-
-### Molecular Visualization
-
-- UCSF ChimeraX
-
-### ADMET Prediction
-
-- ADMETlab
-
-### Development Environment
-
-- Google Colab
-- Jupyter Notebook
-- GitHub
+---
 
 ## Limitations
 
-- ChEMBL IC50 values were obtained from different assays, so experimental conditions may vary.
-- Only exact IC50 measurements reported in nM were retained.
-- Duplicate measurements were summarized using the median IC50.
-- Activity thresholds used in the project were project-defined.
-- Random train/test splitting may overestimate performance when structurally similar compounds occur in both datasets.
-- Scaffold-based performance was lower, indicating reduced generalization to new structural series.
-- The PubChem external library was generated using similarity to erlotinib and therefore represents an erlotinib-biased chemical space.
-- Machine-learning active-class scores are computational outputs and not experimentally measured probabilities.
-- Molecular docking scores are approximate computational scoring values.
+- ChEMBL IC50 values come from different assays, so experimental conditions vary.
+- The curated dataset is small (308 compounds), which limits model reliability.
+- Activity thresholds were project-defined.
+- Random-split performance is optimistic; scaffold-split performance was noticeably lower.
+- The PubChem library was built by similarity to erlotinib, so it covers an erlotinib-biased chemical space.
+- ML scores and docking scores are computational estimates, not experimental measurements.
 - Formal crystal-pose RMSD redocking validation was not performed.
-- ADMETlab results are computational predictions.
-- The prioritized compounds have not been experimentally validated for EGFR inhibition, safety, or therapeutic efficacy.
+- ADMET values are predictions.
+- None of the prioritised compounds has been experimentally validated for EGFR inhibition, safety or efficacy.
+
+---
 
 ## Conclusion
 
-This project demonstrates an integrated computational workflow for EGFR-focused drug discovery using machine learning, cheminformatics, molecular docking, protein-ligand interaction analysis, and ADMET prediction.
+This project demonstrates an integrated workflow from raw public bioactivity data to computationally prioritised EGFR candidates. The contrast between random-split and scaffold-split performance highlights the importance of realistic validation, and the final prioritisation shows the value of combining several independent computational signals rather than relying on a single score.
 
-The workflow progressed from raw public bioactivity data through molecular representation, predictive modelling, scaffold-based validation, external screening, structural analysis, and final candidate prioritization.
+The selected compounds should be regarded as **computationally prioritised candidates, not validated EGFR inhibitors**; biochemical, cellular, pharmacokinetic and toxicity studies would be required for confirmation.
 
-The project also demonstrates the importance of combining multiple computational evidence sources rather than relying only on a single metric such as machine-learning score or docking score.
+---
 
-The final compounds should therefore be considered computationally prioritized candidates rather than experimentally validated EGFR inhibitors.
+## Development Note
 
-Further biochemical, cellular, pharmacokinetic, and toxicity studies would be required for experimental validation.
+This project was developed as a self-directed portfolio and learning project. AI-assisted programming tools were used to help write and debug code; the workflow design, tool selection, analysis and interpretation of results were carried out by the author.
 
-## Project Purpose
+---
 
-This project was developed as a portfolio and learning project to build practical skills at the intersection of:
+## Disclaimer
 
-- Artificial Intelligence
-- Bioinformatics
-- Cheminformatics
-- Molecular Biology
-- Computational Chemistry
-- Drug Discovery
+This project is intended for educational and research-training purposes only. Results should not be interpreted as experimental or clinical evidence.
